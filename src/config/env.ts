@@ -12,6 +12,7 @@ const getBaseUrl = (): string => {
 export const ENV = {
   API_BASE_URL: getBaseUrl(),
   USE_FASTAPI,
-  PIXABAY_API_BASE_URL: "https://pixabay.com/api/music/",
-  PIXABAY_API_KEY: "55223370-5892e510692400ad458bc4e62",
+  FREESOUND_API_BASE_URL: "https://freesound.org/apiv2/search/text/",
+  FREESOUND_API_KEY:
+    "VeWy42l5VJbniTZg0dYFa4PxCkUFSYmGRoLSQvNI",
 };
