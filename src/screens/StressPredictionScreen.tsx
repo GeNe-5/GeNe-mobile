@@ -268,7 +268,11 @@ export const StressPredictionScreen: React.FC = () => {
 
         const { sound } = await Audio.Sound.createAsync(
           { uri: track.previewUrl },
-          { shouldPlay: true, isLooping: false, progressUpdateIntervalMillis: 500 }
+          {
+            shouldPlay: true,
+            isLooping: false,
+            progressUpdateIntervalMillis: 500,
+          }
         );
 
         sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
@@ -484,12 +488,13 @@ export const StressPredictionScreen: React.FC = () => {
               </View>
             )}
 
-            {musicError && <Text style={styles.musicErrorText}>{musicError}</Text>}
+            {musicError && (
+              <Text style={styles.musicErrorText}>{musicError}</Text>
+            )}
 
             {recommendedTracks.map((track) => {
               const isActive = activeTrackId === track.id;
-              const actionLabel =
-                isActive && isTrackPlaying ? "Pause" : "Play";
+              const actionLabel = isActive && isTrackPlaying ? "Pause" : "Play";
 
               return (
                 <TouchableOpacity
@@ -508,7 +513,12 @@ export const StressPredictionScreen: React.FC = () => {
                       {track.artist} • {formatDuration(track.durationSec)}
                     </Text>
                   </View>
-                  <View style={[styles.trackAction, isActive && styles.trackActionActive]}>
+                  <View
+                    style={[
+                      styles.trackAction,
+                      isActive && styles.trackActionActive,
+                    ]}
+                  >
                     <Text
                       style={[
                         styles.trackActionText,
