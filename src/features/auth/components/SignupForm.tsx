@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { AccessibilityInfo, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { PrimaryButton } from "../../../components/PrimaryButton";
-import { handleApiError } from "../../../common/utils/response";
 import { notifyError, notifySuccess } from "../../../common/utils/notify";
 import { useRegisterUser } from "../auth.hook";
 import { registerSchema, type RegisterInput } from "../auth.schema";
@@ -28,6 +27,7 @@ export const SignupForm = ({ onSwitchToLogin }: SignupFormProps) => {
       name: "",
       email: "",
       password: "",
+      confirm_password: "",
     },
   });
 
@@ -37,7 +37,7 @@ export const SignupForm = ({ onSwitchToLogin }: SignupFormProps) => {
       notifySuccess("Registration successful. Please log in.");
       onSwitchToLogin();
     } catch (error) {
-      notifyError(handleApiError(error));
+      notifyError(error instanceof Error ? error.message : "Registration failed");
     }
   };
 
@@ -73,6 +73,13 @@ export const SignupForm = ({ onSwitchToLogin }: SignupFormProps) => {
         name="password"
         label="Password"
         placeholder="Create password"
+        secureTextEntry
+      />
+      <FormInput
+        control={control}
+        name="confirm_password"
+        label="Confirm Password"
+        placeholder="Confirm password"
         secureTextEntry
       />
       <PrimaryButton

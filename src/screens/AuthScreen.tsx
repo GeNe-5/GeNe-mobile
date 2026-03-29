@@ -3,7 +3,6 @@ import { StyleSheet, Text, View } from "react-native";
 import { Screen } from "../components/Screen";
 import { LoginForm } from "../features/auth/components/LoginForm";
 import { SignupForm } from "../features/auth/components/SignupForm";
-import { MOCK_LOGIN_CREDENTIALS } from "../common/data/mockData";
 import { colors } from "../theme/colors";
 import { spacing } from "../theme/spacing";
 
@@ -19,13 +18,10 @@ export const AuthScreen = () => {
         importantForAccessibility="yes"
       >
         <Text style={styles.title} accessibilityRole="header" allowFontScaling={true}>
-          Music Therapy
+          GeNe
         </Text>
         <Text style={styles.subtitle} accessibilityRole="text" allowFontScaling={true}>
-          Login to access your calming dashboard
-        </Text>
-        <Text style={styles.hint} accessibilityRole="text" allowFontScaling={true}>
-          Use {MOCK_LOGIN_CREDENTIALS.email} / {MOCK_LOGIN_CREDENTIALS.password}
+          Stress Prediction & Management
         </Text>
       </View>
 

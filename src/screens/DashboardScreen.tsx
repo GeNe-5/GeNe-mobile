@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Audio, type AVPlaybackStatus } from "expo-av";
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Modal,
   Pressable,
   SafeAreaView,
@@ -21,10 +22,14 @@ import {
   submitStressAssessment,
   type StressAssessmentPayload,
 } from "../features/wellness/wellness.api";
+import { useAnalytics } from "../hooks/useAnalytics";
 import { AnalyticsTab } from "./dashboard-tabs/AnalyticsTab";
 import { DiscoverTab } from "./dashboard-tabs/DiscoverTab";
 import { JournalTab } from "./dashboard-tabs/JournalTab";
 import { SettingsTab, type UserProfileForm } from "./dashboard-tabs/SettingsTab";
+import { StressPredictionScreen } from "./StressPredictionScreen";
+import { InferenceHistoryScreen } from "./InferenceHistoryScreen";
+import { ReportScreen } from "./ReportScreen";
 import type { AnalysisRange, RangeData, SavedNote } from "./dashboard-tabs/types";
 import { styles } from "./dashboard.styles";
 import { useAuthStore } from "../features/auth/auth.store";
@@ -149,27 +154,58 @@ const LAST_QUESTIONNAIRE_KEY = "questionnaire-last-completed-at";
 // Set to false to use interval-based checks (every 14 days in normal use).
 const SHOW_QUESTIONNAIRE_PROMPT_ON_EVERY_LOGIN = true;
 
-type BottomTab = "discover" | "journal" | "analytics" | "settings";
+type BottomTab = "discover" | "journal" | "analytics" | "prediction" | "history" | "reports" | "settings";
 
-const rangeData: Record<AnalysisRange, RangeData> = {
-  today: {
-    title: "Today",
-    labels: ["6a", "9a", "12p", "3p", "6p", "9p"],
-    values: [70, 66, 58, 52, 47, 43],
-    message: "Nice progress today. Your stress curve is gently dropping.",
-  },
-  week: {
-    title: "Last 7 Days",
-    labels: ["M", "T", "W", "T", "F", "S", "S"],
-    values: [72, 69, 65, 61, 57, 54, 49],
-    message: "You handled the week well. Recovery is becoming more consistent.",
-  },
-  month: {
-    title: "This Month",
-    labels: ["W1", "W2", "W3", "W4"],
-    values: [74, 67, 59, 52],
-    message: "Strong month. Your baseline stress is trending healthier.",
-  },
+const getRangeTitle = (range: AnalysisRange): string => {
+  switch (range) {
+    case "today":
+      return "Today";
+    case "week":
+      return "Last 7 Days";
+    case "month":
+      return "This Month";
+  }
+};
+
+const generateInsightMessage = (
+  range: AnalysisRange,
+  totalPredictions: number,
+  stressCount: number,
+  nonStressCount: number
+): string => {
+  if (totalPredictions === 0) {
+    return "No data available for this period. Make some predictions to see insights.";
+  }
+
+  const stressPercentage = (stressCount / totalPredictions) * 100;
+
+  if (range === "today") {
+    if (stressPercentage < 30) {
+      return "Great day so far! Your stress levels are well controlled.";
+    } else if (stressPercentage < 60) {
+      return "Moderate stress today. Consider taking a break.";
+    } else {
+      return "High stress detected today. Try some relaxation techniques.";
+    }
+  }
+
+  if (range === "week") {
+    if (stressPercentage < 30) {
+      return "Excellent week! Your stress management is improving.";
+    } else if (stressPercentage < 60) {
+      return "A mixed week. Keep tracking your patterns.";
+    } else {
+      return "This week had challenges. Focus on recovery next week.";
+    }
+  }
+
+  if (stressPercentage < 30) {
+    return "Strong month! Your baseline stress is trending healthier.";
+  } else if (stressPercentage < 60) {
+    return "Decent month. Look for patterns to improve.";
+  } else {
+    return "Difficult month. Consider seeking support.";
+  }
 };
 
 export const DashboardScreen = () => {
@@ -198,7 +234,41 @@ export const DashboardScreen = () => {
   });
   const [answers, setAnswers] = useState<QuestionnaireAnswers>(QUESTIONNAIRE_INITIAL_STATE);
   const logout = useAuthStore((state) => state.logout);
-  const current = rangeData[selectedRange];
+  
+  const { data: analyticsData, isLoading: isAnalyticsLoading, error: analyticsError } = useAnalytics(selectedRange);
+  
+  const current: RangeData = useMemo(() => {
+    if (!analyticsData) {
+      return {
+        title: getRangeTitle(selectedRange),
+        labels: [],
+        values: [],
+        message: "Loading...",
+      };
+    }
+
+    const { chart, summary } = analyticsData;
+    const stressValues = chart.stress_values || [];
+    const nonStressValues = chart.non_stress_values || [];
+    
+    const combinedValues = stressValues.map((stress, i) => {
+      const nonStress = nonStressValues[i] || 0;
+      return stress + nonStress;
+    });
+
+    return {
+      title: getRangeTitle(selectedRange),
+      labels: chart.labels || [],
+      values: combinedValues,
+      message: generateInsightMessage(
+        selectedRange,
+        summary.total_predictions,
+        summary.stress_count,
+        summary.non_stress_count
+      ),
+    };
+  }, [analyticsData, selectedRange]);
+
   const likertScale: LikertScore[] = [1, 2, 3, 4, 5];
 
   const graphWidth = Math.max(220, width - 96);
@@ -277,7 +347,13 @@ export const DashboardScreen = () => {
           ? "Journal tab selected"
           : activeTab === "analytics"
             ? "Analytics tab selected"
-            : "Settings tab selected";
+            : activeTab === "prediction"
+              ? "Prediction tab selected"
+              : activeTab === "history"
+                ? "History tab selected"
+                : activeTab === "reports"
+                  ? "Reports tab selected"
+                  : "Settings tab selected";
     void AccessibilityInfo.announceForAccessibility(tabText);
   }, [activeTab]);
 
@@ -634,7 +710,21 @@ export const DashboardScreen = () => {
                 graphHeight={graphHeight}
                 pointsText={pointsText}
                 chartPoints={chartPoints}
+                isLoading={isAnalyticsLoading}
+                error={analyticsError}
               />
+            )}
+
+            {activeTab === "prediction" && (
+              <StressPredictionScreen />
+            )}
+
+            {activeTab === "history" && (
+              <InferenceHistoryScreen />
+            )}
+
+            {activeTab === "reports" && (
+              <ReportScreen />
             )}
 
             {activeTab === "settings" && (
@@ -651,6 +741,11 @@ export const DashboardScreen = () => {
           </ScrollView>
 
           <View style={styles.bottomBar}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.bottomBarContent}
+            >
             <Pressable
               style={[styles.bottomItem, activeTab === "discover" && styles.bottomItemActive]}
               onPress={() => setActiveTab("discover")}
@@ -709,6 +804,63 @@ export const DashboardScreen = () => {
               </Text>
             </Pressable>
             <Pressable
+              style={[styles.bottomItem, activeTab === "prediction" && styles.bottomItemActive]}
+              onPress={() => setActiveTab("prediction")}
+              accessible={true}
+              accessibilityRole="tab"
+              accessibilityLabel="Prediction tab"
+              accessibilityState={{ selected: activeTab === "prediction" }}
+            >
+              <Ionicons
+                name="pulse"
+                size={16}
+                color={colors.accent}
+                accessible={false}
+                importantForAccessibility="no"
+              />
+              <Text style={styles.bottomLabel} allowFontScaling={true}>
+                Predict
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.bottomItem, activeTab === "history" && styles.bottomItemActive]}
+              onPress={() => setActiveTab("history")}
+              accessible={true}
+              accessibilityRole="tab"
+              accessibilityLabel="History tab"
+              accessibilityState={{ selected: activeTab === "history" }}
+            >
+              <Ionicons
+                name="time"
+                size={16}
+                color={colors.accent}
+                accessible={false}
+                importantForAccessibility="no"
+              />
+              <Text style={styles.bottomLabel} allowFontScaling={true}>
+                History
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.bottomItem, activeTab === "reports" && styles.bottomItemActive]}
+              onPress={() => setActiveTab("reports")}
+              accessible={true}
+              accessibilityRole="tab"
+              accessibilityLabel="Reports tab"
+              accessibilityState={{ selected: activeTab === "reports" }}
+            >
+              <Ionicons
+                name="document-text"
+                size={16}
+                color={colors.accent}
+                accessible={false}
+                importantForAccessibility="no"
+              />
+              <Text style={styles.bottomLabel} allowFontScaling={true}>
+                Reports
+              </Text>
+            </Pressable>
+            <Pressable
               style={[styles.bottomItem, activeTab === "settings" && styles.bottomItemActive]}
               onPress={() => setActiveTab("settings")}
               accessible={true}
@@ -727,6 +879,7 @@ export const DashboardScreen = () => {
                 Settings
               </Text>
             </Pressable>
+            </ScrollView>
           </View>
         </View>
       </SafeAreaView>

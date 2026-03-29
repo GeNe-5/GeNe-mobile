@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, StyleSheet, Text, ViewStyle } from "react-native";
 import { colors } from "../theme/colors";
 import { spacing } from "../theme/spacing";
 
@@ -9,6 +9,7 @@ type PrimaryButtonProps = {
   isLoading?: boolean;
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  style?: ViewStyle;
 };
 
 export const PrimaryButton = ({
@@ -18,6 +19,7 @@ export const PrimaryButton = ({
   isLoading = false,
   accessibilityLabel,
   accessibilityHint,
+  style,
 }: PrimaryButtonProps) => {
   const isDisabled = disabled || isLoading;
 
@@ -27,6 +29,7 @@ export const PrimaryButton = ({
         styles.button,
         isDisabled && styles.buttonDisabled,
         pressed && !isDisabled && styles.buttonPressed,
+        style,
       ]}
       onPress={onPress}
       disabled={isDisabled}

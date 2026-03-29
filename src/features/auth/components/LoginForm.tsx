@@ -3,12 +3,9 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { AccessibilityInfo, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { PrimaryButton } from "../../../components/PrimaryButton";
-import { handleApiError } from "../../../common/utils/response";
 import { notifyError, notifySuccess } from "../../../common/utils/notify";
-import { MOCK_LOGIN_CREDENTIALS } from "../../../common/data/mockData";
 import { useLoginUser } from "../auth.hook";
 import { loginSchema, type LoginInput } from "../auth.schema";
-import { useAuthStore } from "../auth.store";
 import { FormInput } from "./FormInput";
 import { colors } from "../../../theme/colors";
 import { spacing } from "../../../theme/spacing";
@@ -19,7 +16,6 @@ type LoginFormProps = {
 
 export const LoginForm = ({ onSwitchToSignup }: LoginFormProps) => {
   const loginMutation = useLoginUser();
-  const setAccessToken = useAuthStore((state) => state.setAccessToken);
 
   const {
     control,
@@ -28,18 +24,17 @@ export const LoginForm = ({ onSwitchToSignup }: LoginFormProps) => {
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: MOCK_LOGIN_CREDENTIALS.email,
-      password: MOCK_LOGIN_CREDENTIALS.password,
+      email: "",
+      password: "",
     },
   });
 
   const onSubmit = async (payload: LoginInput) => {
     try {
-      const response = await loginMutation.mutateAsync(payload);
-      setAccessToken(response.data.accessToken);
+      await loginMutation.mutateAsync(payload);
       notifySuccess("Login successful");
     } catch (error) {
-      notifyError(handleApiError(error));
+      notifyError(error instanceof Error ? error.message : "Login failed");
     }
   };
 

@@ -1,64 +1,61 @@
-import { useMutation } from "@tanstack/react-query";
-import { MOCK_LOGIN_CREDENTIALS } from "../../common/data/mockData";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { authApi, saveAuthData, clearAuthData } from "../../api/auth";
+import { userApi } from "../../api/user";
+import { useAuthStore } from "./auth.store";
 import type { LoginInput, RegisterInput } from "./auth.schema";
-
-const AUTH_ENDPOINTS = {
-  register: "/auth/register",
-  login: "/auth/login",
-} as const;
-
-type RegisterResponse = {
-  status: string;
-  message: string;
-  endpoint: string;
-};
-
-type LoginResponse = {
-  status: string;
-  message: string;
-  data: { accessToken: string };
-  endpoint: string;
-};
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+import type { User } from "../../types/api";
 
 export const useRegisterUser = () => {
-  return useMutation<RegisterResponse, unknown, RegisterInput>({
-    mutationFn: async () => {
-      await wait(600);
-
-      return {
-        status: "success",
-        message: "Registration successful",
-        endpoint: AUTH_ENDPOINTS.register,
-      };
+  return useMutation<{ message: string; user_id: number }, Error, RegisterInput>({
+    mutationFn: async (payload) => {
+      const response = await authApi.register(payload);
+      return response;
     },
   });
 };
 
 export const useLoginUser = () => {
-  return useMutation<LoginResponse, unknown, LoginInput>({
+  const setUser = useAuthStore((state) => state.setUser);
+  
+  return useMutation<{ access_token: string; refresh_token: string; user: User }, Error, LoginInput>({
     mutationFn: async (payload) => {
-      await wait(700);
+      const response = await authApi.login(payload);
+      saveAuthData(response.access_token, response.refresh_token, response.user);
+      setUser(response.user);
+      return response;
+    },
+  });
+};
 
-      const isValidEmail =
-        payload.email.trim().toLowerCase() === MOCK_LOGIN_CREDENTIALS.email;
-      const isValidPassword = payload.password === MOCK_LOGIN_CREDENTIALS.password;
+export const useCurrentUser = () => {
+  const user = useAuthStore((state) => state.user);
+  
+  return useQuery<User | null, Error>({
+    queryKey: ["currentUser"],
+    queryFn: async () => {
+      const response = await authApi.getCurrentUser();
+      useAuthStore.getState().setUser(response);
+      return response;
+    },
+    enabled: !!useAuthStore.getState().accessToken,
+    staleTime: 5 * 60 * 1000,
+  });
+};
 
-      if (!isValidEmail || !isValidPassword) {
-        throw new Error(
-          `Invalid credentials. Use ${MOCK_LOGIN_CREDENTIALS.email} / ${MOCK_LOGIN_CREDENTIALS.password}`
-        );
-      }
+export const useLogout = () => {
+  return () => {
+    clearAuthData();
+  };
+};
 
-      return {
-        status: "success",
-        message: "Login successful",
-        endpoint: AUTH_ENDPOINTS.login,
-        data: {
-          accessToken: "mock-access-token",
-        },
-      };
+export const useRefreshUser = () => {
+  const setUser = useAuthStore((state) => state.setUser);
+  
+  return useMutation<User, Error>({
+    mutationFn: async () => {
+      const response = await authApi.getCurrentUser();
+      setUser(response);
+      return response;
     },
   });
 };

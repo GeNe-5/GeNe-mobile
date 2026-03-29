@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
-import { apiClient } from "../../config/axios.config";
-import { handleApiError } from "../../common/utils/response";
+import { apiClient, handleApiError } from "../../api/client";
 
 export type UserProfilePayload = {
   name: string;
@@ -39,8 +38,6 @@ const WELLNESS_STORAGE_KEYS = {
   assessments: "wellness-local-assessments",
 } as const;
 
-// Demo fallback: keep app functional without backend.
-// Set this to false once backend APIs are available.
 const USE_LOCAL_WELLNESS_FALLBACK = true;
 
 const isNetworkError = (error: unknown) =>
