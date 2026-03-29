@@ -36,7 +36,7 @@ const STRESS_LEVEL_QUERIES: Record<StressLevelKey, string> = {
   stress_1: "chill lofi soft piano",
   stress_2: "meditation breathing relaxation",
   stress_3: "deep calm slow instrumental",
-  panic: "grounding anxiety relief calm voice",
+  panic: "anxiety relief",
 };
 
 const pickPlayableUrl = (hit: FreesoundAudioHit): string | null => {

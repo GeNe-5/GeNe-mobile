@@ -1,10 +1,11 @@
 import { Platform } from "react-native";
 import { SensorFrame, SocketState } from "../types/stream";
+import { ENV } from "../config/env";
 
 const WS_BASE_URL = Platform.select({
-  ios: "ws://192.168.1.83:8765",
-  android: "ws://10.0.2.2:8765",
-  default: "ws://192.168.1.83:8765",
+  ios: ENV.WS_BASE_URL_IOS,
+  android: ENV.WS_BASE_URL_ANDROID,
+  default: ENV.WS_BASE_URL_DEFAULT,
 }) as string;
 
 const RECONNECT_TIMEOUT_MS = 10000;
