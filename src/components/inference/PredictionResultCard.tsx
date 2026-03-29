@@ -3,6 +3,11 @@ import { View, Text, StyleSheet } from "react-native";
 import { colors } from "../../theme/colors";
 import { spacing } from "../../theme/spacing";
 import { InferenceResponse } from "../../types/inference";
+import {
+  getStressLevelLabel,
+  normalizeStressLevel,
+  STRESS_LEVEL_COLORS,
+} from "../../utils/stressLevel";
 
 interface PredictionResultCardProps {
   result: InferenceResponse | null;
@@ -49,19 +54,21 @@ export const PredictionResultCard: React.FC<PredictionResultCardProps> = ({
   }
 
   const isStress = result.prediction === 1;
-  const severityLevel = result.severity_level ?? null;
+  const severityLevel = normalizeStressLevel(
+    result.stress_level ?? result.severity_level
+  );
   const severityScore = result.severity_score ?? null;
   const hasSeverity =
-    typeof severityLevel === "string" || typeof severityScore === "number";
+    severityLevel !== null || typeof severityScore === "number";
   const severityLabel = severityLevel
-    ? SEVERITY_LABELS[severityLevel] ?? "Unknown"
+    ? getStressLevelLabel(severityLevel)
     : "Unavailable";
   const severityPercent =
     typeof severityScore === "number"
       ? Math.round(severityScore * 1000) / 10
       : null;
   const severityColor = severityLevel
-    ? SEVERITY_COLORS[severityLevel] ?? colors.textSecondary
+    ? STRESS_LEVEL_COLORS[severityLevel] ?? colors.textSecondary
     : colors.textSecondary;
   const severityComponents = result.severity_components ?? null;
   const inputSummary = result.input_summary ?? null;
@@ -197,24 +204,6 @@ export const PredictionResultCard: React.FC<PredictionResultCardProps> = ({
       </View>
     </View>
   );
-};
-
-const SEVERITY_LABELS: Record<string, string> = {
-  no_stress: "No Stress",
-  stress_1: "Stress Level 1",
-  stress_2: "Stress Level 2",
-  stress_3: "Stress Level 3",
-  stress_4: "Stress Level 4",
-  panic: "Panic",
-};
-
-const SEVERITY_COLORS: Record<string, string> = {
-  no_stress: "#16A34A",
-  stress_1: "#84CC16",
-  stress_2: "#FACC15",
-  stress_3: "#FB923C",
-  stress_4: "#F97316",
-  panic: "#DC2626",
 };
 
 const buildSeverityComponents = (components: {

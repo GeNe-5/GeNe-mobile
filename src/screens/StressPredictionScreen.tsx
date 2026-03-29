@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   StyleSheet,
   Text,
@@ -8,10 +8,12 @@ import {
   ActivityIndicator,
   Animated,
 } from "react-native";
+import { Audio, type AVPlaybackStatus } from "expo-av";
 import { Screen } from "../components/Screen";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useMutation } from "@tanstack/react-query";
 import { inferenceApi } from "../api/inference";
+import { musicApi } from "../api/music";
 import { usePhysioStream, MIN_SAMPLES } from "../hooks/usePhysioStream";
 import { LiveMetricChart } from "../components/inference/LiveMetricChart";
 import { SessionSummaryCard } from "../components/inference/SessionSummaryCard";
@@ -19,8 +21,14 @@ import { FeatureSummaryCard } from "../components/inference/FeatureSummaryCard";
 import { PredictionResultCard } from "../components/inference/PredictionResultCard";
 import { SocketState } from "../types/stream";
 import { InferenceResponse } from "../types/inference";
+import { MusicTrack } from "../types/music";
 import { colors } from "../theme/colors";
 import { spacing } from "../theme/spacing";
+import {
+  getStressLevelLabel,
+  normalizeStressLevel,
+  type StressLevelKey,
+} from "../utils/stressLevel";
 
 const getSocketStateLabel = (state: SocketState): string => {
   switch (state) {
@@ -153,10 +161,28 @@ const METRICS = [
   { key: "respRate", label: "Resp Rate", unit: "/min" },
 ] as const;
 
+const formatDuration = (durationSec: number): string => {
+  if (!durationSec || durationSec <= 0) {
+    return "--:--";
+  }
+  const minutes = Math.floor(durationSec / 60);
+  const seconds = durationSec % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
+
 export const StressPredictionScreen: React.FC = () => {
   const [predictionResult, setPredictionResult] =
     useState<InferenceResponse | null>(null);
   const [predictionError, setPredictionError] = useState<string | null>(null);
+  const [recommendedTracks, setRecommendedTracks] = useState<MusicTrack[]>([]);
+  const [musicError, setMusicError] = useState<string | null>(null);
+  const [musicLoading, setMusicLoading] = useState(false);
+  const [musicStressLevel, setMusicStressLevel] =
+    useState<StressLevelKey | null>(null);
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [isTrackPlaying, setIsTrackPlaying] = useState(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const loadedTrackIdRef = useRef<string | null>(null);
 
   const {
     socketState,
@@ -168,6 +194,111 @@ export const StressPredictionScreen: React.FC = () => {
     aggregatedFeatures,
     sampleCount,
   } = usePhysioStream();
+
+  const releaseSound = useCallback(async () => {
+    if (!soundRef.current) {
+      loadedTrackIdRef.current = null;
+      return;
+    }
+
+    soundRef.current.setOnPlaybackStatusUpdate(null);
+    await soundRef.current.unloadAsync();
+    soundRef.current = null;
+    loadedTrackIdRef.current = null;
+  }, []);
+
+  const resetMusic = useCallback(async () => {
+    await releaseSound();
+    setRecommendedTracks([]);
+    setMusicError(null);
+    setMusicStressLevel(null);
+    setActiveTrackId(null);
+    setIsTrackPlaying(false);
+  }, [releaseSound]);
+
+  const loadRecommendedMusic = useCallback(async (level: StressLevelKey) => {
+    setMusicLoading(true);
+    setMusicError(null);
+    setMusicStressLevel(level);
+
+    try {
+      const tracks = await musicApi.getTracksForStressLevel(level, 2);
+      setRecommendedTracks(tracks);
+      setActiveTrackId(null);
+      setIsTrackPlaying(false);
+
+      if (tracks.length === 0) {
+        setMusicError("No playable tracks found for this stress level.");
+      }
+    } catch (error) {
+      setRecommendedTracks([]);
+      setMusicError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load music recommendations."
+      );
+    } finally {
+      setMusicLoading(false);
+    }
+  }, []);
+
+  const handleTrackPress = useCallback(
+    async (track: MusicTrack) => {
+      try {
+        await Audio.setAudioModeAsync({
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+        });
+
+        setActiveTrackId(track.id);
+
+        if (soundRef.current && loadedTrackIdRef.current === track.id) {
+          const status = await soundRef.current.getStatusAsync();
+          if (status.isLoaded && status.isPlaying) {
+            await soundRef.current.pauseAsync();
+            setIsTrackPlaying(false);
+          } else if (status.isLoaded) {
+            await soundRef.current.playAsync();
+            setIsTrackPlaying(true);
+          }
+          return;
+        }
+
+        await releaseSound();
+
+        const { sound } = await Audio.Sound.createAsync(
+          { uri: track.previewUrl },
+          { shouldPlay: true, isLooping: false, progressUpdateIntervalMillis: 500 }
+        );
+
+        sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+          if (!status.isLoaded) {
+            return;
+          }
+
+          setIsTrackPlaying(status.isPlaying);
+
+          if (status.didJustFinish) {
+            setIsTrackPlaying(false);
+          }
+        });
+
+        soundRef.current = sound;
+        loadedTrackIdRef.current = track.id;
+        setIsTrackPlaying(true);
+      } catch {
+        setMusicError("Unable to play this track right now.");
+        setIsTrackPlaying(false);
+      }
+    },
+    [releaseSound]
+  );
+
+  useEffect(() => {
+    return () => {
+      void releaseSound();
+    };
+  }, [releaseSound]);
 
   const predictionMutation = useMutation({
     mutationFn: async () => {
@@ -183,6 +314,23 @@ export const StressPredictionScreen: React.FC = () => {
     onSuccess: (data) => {
       setPredictionResult(data);
       setPredictionError(null);
+
+      const resolvedStressLevel = normalizeStressLevel(
+        data.stress_level ?? data.severity_level
+      );
+
+      void releaseSound();
+      setActiveTrackId(null);
+      setIsTrackPlaying(false);
+
+      if (!resolvedStressLevel) {
+        setRecommendedTracks([]);
+        setMusicStressLevel(null);
+        setMusicError("Stress level unavailable for music recommendation.");
+        return;
+      }
+
+      void loadRecommendedMusic(resolvedStressLevel);
     },
     onError: (error: Error) => {
       setPredictionError(error.message || "Prediction failed");
@@ -193,6 +341,7 @@ export const StressPredictionScreen: React.FC = () => {
   const handleListen = () => {
     setPredictionResult(null);
     setPredictionError(null);
+    void resetMusic();
     startListening();
   };
 
@@ -209,6 +358,7 @@ export const StressPredictionScreen: React.FC = () => {
     resetSession();
     setPredictionResult(null);
     setPredictionError(null);
+    void resetMusic();
   };
 
   const isListening =
@@ -317,6 +467,62 @@ export const StressPredictionScreen: React.FC = () => {
           isLoading={predictionMutation.isPending}
           error={predictionError}
         />
+
+        {(musicLoading || musicError || recommendedTracks.length > 0) && (
+          <View style={styles.musicSection}>
+            <Text style={styles.musicTitle}>Recommended Music</Text>
+            {musicStressLevel && (
+              <Text style={styles.musicSubtitle}>
+                For {getStressLevelLabel(musicStressLevel)}
+              </Text>
+            )}
+
+            {musicLoading && (
+              <View style={styles.musicLoadingRow}>
+                <ActivityIndicator color={colors.accent} size="small" />
+                <Text style={styles.musicLoadingText}>Fetching tracks...</Text>
+              </View>
+            )}
+
+            {musicError && <Text style={styles.musicErrorText}>{musicError}</Text>}
+
+            {recommendedTracks.map((track) => {
+              const isActive = activeTrackId === track.id;
+              const actionLabel =
+                isActive && isTrackPlaying ? "Pause" : "Play";
+
+              return (
+                <TouchableOpacity
+                  key={track.id}
+                  style={styles.trackRow}
+                  onPress={() => {
+                    void handleTrackPress(track);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.trackMeta}>
+                    <Text style={styles.trackTitle} numberOfLines={1}>
+                      {track.title}
+                    </Text>
+                    <Text style={styles.trackArtist} numberOfLines={1}>
+                      {track.artist} • {formatDuration(track.durationSec)}
+                    </Text>
+                  </View>
+                  <View style={[styles.trackAction, isActive && styles.trackActionActive]}>
+                    <Text
+                      style={[
+                        styles.trackActionText,
+                        isActive && styles.trackActionTextActive,
+                      ]}
+                    >
+                      {actionLabel}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
 
         <TouchableOpacity style={styles.resetSection} onPress={handleReset}>
           <Text style={styles.resetText}>Reset Session</Text>
@@ -434,6 +640,78 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     marginTop: spacing.md,
+  },
+  musicSection: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  musicTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  musicSubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: -2,
+  },
+  musicLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  musicLoadingText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  musicErrorText: {
+    fontSize: 13,
+    color: "#D9534F",
+  },
+  trackRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  trackMeta: {
+    flex: 1,
+  },
+  trackTitle: {
+    fontSize: 14,
+    color: colors.textPrimary,
+    fontWeight: "600",
+  },
+  trackArtist: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  trackAction: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  trackActionActive: {
+    backgroundColor: colors.accent,
+  },
+  trackActionText: {
+    fontSize: 12,
+    color: colors.accent,
+    fontWeight: "700",
+  },
+  trackActionTextActive: {
+    color: colors.surface,
   },
   resetSection: {
     alignItems: "center",

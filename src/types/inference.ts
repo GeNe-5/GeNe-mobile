@@ -45,8 +45,9 @@ export interface InferenceResponse {
   model_name: string;
   model_version: string;
   model_mode?: string;
+  stress_level?: number | null;
   severity_score?: number | null;
-  severity_level?: string | null;
+  severity_level?: string | number | null;
   severity_components?: {
     hr_score?: number;
     rmssd_score?: number;
