@@ -3,26 +3,32 @@ import { ENV } from "../config/env";
 import type { MusicTrack } from "../types/music";
 import type { StressLevelKey } from "../utils/stressLevel";
 
-type PixabayMusicHit = {
+type FreesoundAudioHit = {
   id: number;
   duration?: number;
-  user?: string;
-  tags?: string;
+  username?: string;
+  tags?: string[];
   name?: string;
-  audio?: {
-    url?: string;
-    mp3?: {
-      url?: string;
-    };
-    ogg?: {
-      url?: string;
-    };
+  previews?: {
+    "preview-hq-mp3"?: string;
+    "preview-lq-mp3"?: string;
   };
-  previewURL?: string;
 };
 
-type PixabayMusicResponse = {
-  hits: PixabayMusicHit[];
+type FreesoundSearchResponse = {
+  results: FreesoundAudioHit[];
+};
+
+type FreesoundSoundDetailsResponse = {
+  id: number;
+  duration?: number;
+  username?: string;
+  tags?: string[];
+  name?: string;
+  previews?: {
+    "preview-hq-mp3"?: string;
+    "preview-lq-mp3"?: string;
+  };
 };
 
 const STRESS_LEVEL_QUERIES: Record<StressLevelKey, string> = {
@@ -33,14 +39,28 @@ const STRESS_LEVEL_QUERIES: Record<StressLevelKey, string> = {
   panic: "grounding anxiety relief calm voice",
 };
 
-const pickPlayableUrl = (hit: PixabayMusicHit): string | null => {
-  return (
-    hit.audio?.mp3?.url ??
-    hit.audio?.url ??
-    hit.audio?.ogg?.url ??
-    hit.previewURL ??
-    null
-  );
+const pickPlayableUrl = (hit: FreesoundAudioHit): string | null => {
+  return hit.previews?.["preview-hq-mp3"] ?? hit.previews?.["preview-lq-mp3"] ?? null;
+};
+
+const fetchSoundPreview = async (
+  soundId: number
+): Promise<FreesoundSoundDetailsResponse | null> => {
+  try {
+    const detailsResponse = await axios.get<FreesoundSoundDetailsResponse>(
+      `https://freesound.org/apiv2/sounds/${soundId}/`,
+      {
+        params: {
+          token: ENV.FREESOUND_API_KEY,
+          fields: "id,name,username,duration,tags,previews",
+        },
+      }
+    );
+
+    return detailsResponse.data;
+  } catch {
+    return null;
+  }
 };
 
 export const musicApi = {
@@ -48,41 +68,71 @@ export const musicApi = {
     level: StressLevelKey,
     take: number = 2
   ): Promise<MusicTrack[]> => {
-    if (!ENV.PIXABAY_API_KEY) {
+    if (!ENV.FREESOUND_API_KEY) {
       throw new Error(
-        "Pixabay API key is missing. Set EXPO_PUBLIC_PIXABAY_API_KEY in your environment."
+        "Freesound API key is missing. Set EXPO_PUBLIC_FREESOUND_API_KEY in your environment."
       );
     }
 
-    const response = await axios.get<PixabayMusicResponse>(
-      ENV.PIXABAY_API_BASE_URL,
+    const response = await axios.get<FreesoundSearchResponse>(
+      ENV.FREESOUND_API_BASE_URL,
       {
         params: {
-          key: ENV.PIXABAY_API_KEY,
-          q: STRESS_LEVEL_QUERIES[level],
-          per_page: 12,
-          safesearch: true,
+          token: ENV.FREESOUND_API_KEY,
+          query: STRESS_LEVEL_QUERIES[level],
+          page_size: 12,
+          fields: "id,name,username,duration,tags,previews",
         },
       }
     );
 
-    return (response.data.hits ?? [])
-      .map((hit) => {
-        const previewUrl = pickPlayableUrl(hit);
-        if (!previewUrl) return null;
+    const candidates = response.data.results ?? [];
+
+    const mappedTracks = await Promise.all(
+      candidates.map(async (hit) => {
+        let enrichedHit: FreesoundAudioHit = hit;
+        let previewUrl = pickPlayableUrl(hit);
+
+        // Some search responses omit preview fields unless explicitly expanded;
+        // fetch the sound details as a fallback so playback still works.
+        if (!previewUrl) {
+          const details = await fetchSoundPreview(hit.id);
+          if (!details) {
+            return null;
+          }
+
+          enrichedHit = {
+            id: details.id,
+            duration: details.duration,
+            username: details.username,
+            tags: details.tags,
+            name: details.name,
+            previews: details.previews,
+          };
+          previewUrl = pickPlayableUrl(enrichedHit);
+        }
+
+        if (!previewUrl) {
+          return null;
+        }
 
         const track: MusicTrack = {
-          id: String(hit.id),
-          title: hit.name || "Untitled Track",
-          artist: hit.user || "Pixabay Artist",
+          id: String(enrichedHit.id),
+          title: enrichedHit.name || "Untitled Track",
+          artist: enrichedHit.username || "Freesound Creator",
           previewUrl,
-          durationSec: hit.duration ?? 0,
+          durationSec: Math.round(enrichedHit.duration ?? 0),
           level,
-          ...(hit.tags ? { tags: hit.tags } : {}),
+          ...(enrichedHit.tags?.length
+            ? { tags: enrichedHit.tags.join(", ") }
+            : {}),
         };
 
         return track;
       })
+    );
+
+    return mappedTracks
       .filter((track): track is MusicTrack => track !== null)
       .slice(0, Math.max(1, take));
   },
